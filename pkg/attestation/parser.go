@@ -29,7 +29,7 @@ func ParseWitnessData(data []byte, typeFilter []string) ([]TypedAttestation, err
 		if err := json.Unmarshal(data, &statement); err != nil {
 			return nil, fmt.Errorf("failed to unmarshal in-toto statement: %w", err)
 		}
-		return extractAttestations(statement.Predicate, typeFilter)
+		return extractAttestations(statement.Predicate, statement.PredicateType, typeFilter)
 	}
 
 	var rawEnvelope struct {
@@ -55,7 +55,7 @@ func ParseWitnessData(data []byte, typeFilter []string) ([]TypedAttestation, err
 		return nil, fmt.Errorf("failed to unmarshal in-toto statement: %w", err)
 	}
 
-	return extractAttestations(statement.Predicate, typeFilter)
+	return extractAttestations(statement.Predicate, statement.PredicateType, typeFilter)
 }
 
 func decodeEnvelopePayload(rawPayload json.RawMessage) ([]byte, error) {
@@ -84,7 +84,7 @@ func decodeBase64Any(s string) ([]byte, error) {
 	return decoded, nil
 }
 
-func extractAttestations(predicate map[string]interface{}, typeFilter []string) ([]TypedAttestation, error) {
+func extractAttestations(predicate map[string]interface{}, predicateType string, typeFilter []string) ([]TypedAttestation, error) {
 	var result []TypedAttestation
 
 	filterSet := make(map[string]struct{})
@@ -100,6 +100,20 @@ func extractAttestations(predicate map[string]interface{}, typeFilter []string) 
 
 	attestationsRaw, ok := predicate["attestations"]
 	if !ok {
+		if predicateType != "" {
+			cType := canonicalAttestationType(predicateType)
+			if len(filterSet) > 0 {
+				if _, ok := filterSet[cType]; !ok {
+					return result, nil
+				}
+			}
+			return []TypedAttestation{
+				{
+					Type: cType,
+					Data: predicate,
+				},
+			}, nil
+		}
 		return result, nil
 	}
 
@@ -147,6 +161,9 @@ func canonicalAttestationType(rawType string) string {
 	if t == "" {
 		return ""
 	}
+
+	t = strings.TrimSuffix(t, ".schema.json")
+	t = strings.TrimSuffix(t, ".json")
 
 	// Handles both shorthand types and URI-style types.
 	parts := strings.Split(t, "/")

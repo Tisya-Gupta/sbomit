@@ -33,6 +33,9 @@ type Options struct {
 	CatalogFile      string
 	ProjectDir       string
 	SkipPaths        []string
+	SRACFile         string
+	SRACReport       string
+	FailClosedSRAC   bool
 }
 
 // DefaultOptions returns default generator options
@@ -41,12 +44,15 @@ func DefaultOptions() *Options {
 		DocumentName:     "sbomit-generated-sbom",
 		DocumentVersion:  "0.0.1",
 		Authors:          []string{},
-		AttestationTypes: []string{"material", "command-run", "product", "network-trace"},
+		AttestationTypes: []string{"material", "command-run", "product", "network-trace", "srac"},
 		OutputFormat:     "spdx23",
 		Catalog:          "",
 		CatalogFile:      "",
 		ProjectDir:       "",
 		SkipPaths:        []string{},
+		SRACFile:         "",
+		SRACReport:       "",
+		FailClosedSRAC:   true,
 	}
 }
 
@@ -156,16 +162,44 @@ func (g *Generator) GenerateFromAttestations(attestations []attestation.TypedAtt
 
 	attDoc := g.createDocument(result)
 
+	var targetDoc *sbom.Document
 	if baseDoc != nil {
 		g.applyMetadata(baseDoc)
 		enrichment := g.mergePreferAttestation(baseDoc, attDoc)
 		WriteEnrichmentSummary(os.Stderr, enrichment)
-		err = g.writeOutput(baseDoc)
-		return baseDoc, err
+		targetDoc = baseDoc
+	} else {
+		targetDoc = attDoc
 	}
 
-	err = g.writeOutput(attDoc)
-	return attDoc, err
+	sracAssertions, err := attestation.ExtractSRACFromTypedAttestations(attestations)
+	if err != nil {
+		return nil, fmt.Errorf("failed to extract SRAC assertions: %w", err)
+	}
+
+	if strings.TrimSpace(g.opts.SRACFile) != "" {
+		standalone, err := attestation.ParseSRACFile(g.opts.SRACFile)
+		if err != nil {
+			return nil, fmt.Errorf("failed to parse SRAC file: %w", err)
+		}
+		sracAssertions = append(sracAssertions, standalone)
+	}
+
+	if len(sracAssertions) > 0 {
+		reports, summary, err := g.CorrelateSRAC(targetDoc, sracAssertions, g.opts.FailClosedSRAC)
+		WriteSRACSummary(os.Stderr, summary)
+		if err != nil {
+			return nil, err
+		}
+		if strings.TrimSpace(g.opts.SRACReport) != "" {
+			if err := WriteSRACFileReport(g.opts.SRACReport, reports); err != nil {
+				return nil, fmt.Errorf("failed to write SRAC report: %w", err)
+			}
+		}
+	}
+
+	err = g.writeOutput(targetDoc)
+	return targetDoc, err
 }
 
 func (g *Generator) shouldSkip(path string) bool {

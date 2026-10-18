@@ -21,6 +21,9 @@ var (
 	projectDir       string
 	skipPaths        []string
 	summaryFlag      bool
+	sracFile         string
+	sracReport       string
+	failClosedSRAC   bool
 )
 
 var generateCmd = &cobra.Command{
@@ -59,12 +62,15 @@ func init() {
 	generateCmd.Flags().StringVarP(&documentName, "name", "n", "sbomit-sbom", "Name for the SBOM document")
 	generateCmd.Flags().StringVarP(&documentVersion, "version", "v", "0.0.1", "Version for the SBOM document")
 	generateCmd.Flags().StringSliceVar(&authors, "author", []string{}, "Document authors (can be specified multiple times)")
-	generateCmd.Flags().StringSliceVar(&attestationTypes, "types", []string{"material", "command-run", "product", "network-trace"}, "Attestation types to parse (comma-separated).")
+	generateCmd.Flags().StringSliceVar(&attestationTypes, "types", []string{"material", "command-run", "product", "network-trace", "srac"}, "Attestation types to parse (comma-separated).")
 	generateCmd.Flags().StringVarP(&catalog, "catalog", "c", "", "Cataloger to run before processing attestations (supported: syft, trivy)")
 	generateCmd.Flags().StringVar(&catalogFile, "catalog-file", "", "Existing SBOM catalog file to merge with attestation-derived packages")
 	generateCmd.Flags().StringVar(&projectDir, "project-dir", "", "Project directory to scan with the cataloger (default: current directory)")
 	generateCmd.Flags().StringSliceVar(&skipPaths, "skip-path", []string{}, "Exclude paths matching glob pattern")
 	generateCmd.Flags().BoolVar(&summaryFlag, "summary", false, "Also print per-package details under each ecosystem (default: only ecosystem counts are shown)")
+	generateCmd.Flags().StringVar(&sracFile, "srac-file", "", "Path to a standalone SRAC assertion file (optional; SRAC can also be embedded in the witness attestation)")
+	generateCmd.Flags().StringVar(&sracReport, "srac-report", "", "Path to write the SRAC enrichment/correlation report JSON")
+	generateCmd.Flags().BoolVar(&failClosedSRAC, "fail-closed-srac", true, "Fail SBOM generation if any SRAC assertion is invalid, unmatched, ambiguous, or stale (default: true)")
 }
 
 func runGenerate(attestationFile string) error {
@@ -95,6 +101,12 @@ func runGenerate(attestationFile string) error {
 		}
 	}
 
+	if sracFile != "" {
+		if _, err := os.Stat(sracFile); os.IsNotExist(err) {
+			return fmt.Errorf("srac file not found: %s", sracFile)
+		}
+	}
+
 	opts := &generator.Options{
 		DocumentName:     documentName,
 		DocumentVersion:  documentVersion,
@@ -106,6 +118,9 @@ func runGenerate(attestationFile string) error {
 		CatalogFile:      catalogFile,
 		ProjectDir:       projectDir,
 		SkipPaths:        skipPaths,
+		SRACFile:         sracFile,
+		SRACReport:       sracReport,
+		FailClosedSRAC:   failClosedSRAC,
 	}
 
 	gen := generator.New(opts)
