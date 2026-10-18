@@ -182,7 +182,7 @@ func (g *Generator) GenerateFromAttestations(attestations []attestation.TypedAtt
 		if err != nil {
 			return nil, fmt.Errorf("failed to parse SRAC file: %w", err)
 		}
-		sracAssertions = append(sracAssertions, standalone)
+		sracAssertions = append(sracAssertions, standalone...)
 	}
 
 	if len(sracAssertions) > 0 {

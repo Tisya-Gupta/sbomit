@@ -2,6 +2,7 @@ package attestation
 
 import (
 	"encoding/json"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -92,11 +93,41 @@ func TestParseSRACFileDirectJSON(t *testing.T) {
 		t.Fatalf("ParseSRACFile failed: %v", err)
 	}
 
-	if wrapped.Assertion.AssertionID != "srac-synthetic-brake-monitor-001" {
-		t.Errorf("unexpected assertion ID: %s", wrapped.Assertion.AssertionID)
+	if len(wrapped) != 1 {
+		t.Fatalf("expected 1 assertion, got %d", len(wrapped))
 	}
-	if wrapped.SHA256 == "" {
+	if wrapped[0].Assertion.AssertionID != "srac-synthetic-brake-monitor-001" {
+		t.Errorf("unexpected assertion ID: %s", wrapped[0].Assertion.AssertionID)
+	}
+	if wrapped[0].SHA256 == "" {
 		t.Errorf("expected non-empty SHA256 digest")
+	}
+}
+
+func TestParseSRACFileArray(t *testing.T) {
+	tmpDir := t.TempDir()
+	filePath := filepath.Join(tmpDir, "array.srac.json")
+
+	content := fmt.Sprintf("[%s, %s]", sampleValidSRACJSON(), sampleValidSRACJSON())
+	if err := os.WriteFile(filePath, []byte(content), 0600); err != nil {
+		t.Fatalf("failed to write array file: %v", err)
+	}
+
+	wrapped, err := ParseSRACFile(filePath)
+	if err != nil {
+		t.Fatalf("ParseSRACFile failed on array: %v", err)
+	}
+
+	if len(wrapped) != 2 {
+		t.Fatalf("expected 2 assertions, got %d", len(wrapped))
+	}
+	for i, item := range wrapped {
+		if item.Assertion.AssertionID != "srac-synthetic-brake-monitor-001" {
+			t.Errorf("item %d: unexpected assertion ID %s", i, item.Assertion.AssertionID)
+		}
+		if item.SHA256 == "" {
+			t.Errorf("item %d: expected non-empty SHA256", i)
+		}
 	}
 }
 
@@ -135,8 +166,11 @@ func TestParseSRACFileInTotoStatement(t *testing.T) {
 	if err != nil {
 		t.Fatalf("ParseSRACFile with in-toto statement failed: %v", err)
 	}
-	if wrapped.Assertion.AssertionID != "srac-synthetic-brake-monitor-001" {
-		t.Errorf("unexpected assertion ID: %s", wrapped.Assertion.AssertionID)
+	if len(wrapped) != 1 {
+		t.Fatalf("expected 1 assertion, got %d", len(wrapped))
+	}
+	if wrapped[0].Assertion.AssertionID != "srac-synthetic-brake-monitor-001" {
+		t.Errorf("unexpected assertion ID: %s", wrapped[0].Assertion.AssertionID)
 	}
 }
 

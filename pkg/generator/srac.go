@@ -235,14 +235,14 @@ func matchComponent(subject *attestation.SRACSubject, node *sbom.Node) string {
 		if actualVer == "" {
 			actualVer = node.Version
 		}
-		if subjBase != "" && subjBase == nodeBase && expectedVer != "" && expectedVer == actualVer {
+		if subjBase != "" && subjBase == nodeBase && expectedVer != "" && versionMatches(expectedVer, actualVer) {
 			return "purl-version"
 		}
 	}
 
 	// Rule 3: Name + Version match
 	if subject.Name != "" && subject.Version != "" {
-		if strings.EqualFold(subject.Name, node.Name) && subject.Version == node.Version {
+		if strings.EqualFold(subject.Name, node.Name) && versionMatches(subject.Version, node.Version) {
 			return "name-version"
 		}
 	}
@@ -255,6 +255,17 @@ func matchComponent(subject *attestation.SRACSubject, node *sbom.Node) string {
 	}
 
 	return ""
+}
+
+func versionMatches(v1, v2 string) bool {
+	v1 = strings.TrimSpace(v1)
+	v2 = strings.TrimSpace(v2)
+	if v1 == v2 {
+		return true
+	}
+	trimmed1 := strings.TrimPrefix(strings.TrimPrefix(v1, "v"), "V")
+	trimmed2 := strings.TrimPrefix(strings.TrimPrefix(v2, "v"), "V")
+	return trimmed1 != "" && trimmed1 == trimmed2
 }
 
 func purlBaseAndVersion(purl string) (string, string) {

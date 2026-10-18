@@ -204,12 +204,34 @@ func ParseSRACAssertion(data []byte) (*SRACAssertion, string, error) {
 	return &assertion, digest, nil
 }
 
-// ParseSRACFile reads an SRAC assertion from a file. It automatically supports standalone
-// SRAC JSON, in-toto statements, and DSSE envelopes.
-func ParseSRACFile(path string) (*SRACAssertionWithRaw, error) {
+// ParseSRACFile reads SRAC assertion(s) from a file. It automatically supports standalone
+// SRAC JSON, JSON arrays of assertions, in-toto statements, and DSSE envelopes.
+func ParseSRACFile(path string) ([]*SRACAssertionWithRaw, error) {
 	data, err := os.ReadFile(path)
 	if err != nil {
 		return nil, fmt.Errorf("failed to read SRAC file: %w", err)
+	}
+
+	trimmed := strings.TrimSpace(string(data))
+	if strings.HasPrefix(trimmed, "[") {
+		var list []json.RawMessage
+		if err := json.Unmarshal(data, &list); err != nil {
+			return nil, fmt.Errorf("failed to parse JSON array from %s: %w", path, err)
+		}
+		var result []*SRACAssertionWithRaw
+		for _, item := range list {
+			assertion, digest, err := ParseSRACAssertion(item)
+			if err != nil {
+				return nil, err
+			}
+			result = append(result, &SRACAssertionWithRaw{
+				Assertion: assertion,
+				RawData:   item,
+				SHA256:    digest,
+				URI:       path,
+			})
+		}
+		return result, nil
 	}
 
 	var topLevel map[string]json.RawMessage
@@ -224,11 +246,13 @@ func ParseSRACFile(path string) (*SRACAssertionWithRaw, error) {
 			if err != nil {
 				return nil, err
 			}
-			return &SRACAssertionWithRaw{
-				Assertion: assertion,
-				RawData:   data,
-				SHA256:    digest,
-				URI:       path,
+			return []*SRACAssertionWithRaw{
+				{
+					Assertion: assertion,
+					RawData:   data,
+					SHA256:    digest,
+					URI:       path,
+				},
 			}, nil
 		}
 	}
@@ -254,6 +278,27 @@ func ParseSRACFile(path string) (*SRACAssertionWithRaw, error) {
 			return nil, fmt.Errorf("failed to decode envelope payload: %w", err)
 		}
 
+		trimmedPayload := strings.TrimSpace(string(payload))
+		if strings.HasPrefix(trimmedPayload, "[") {
+			var list []json.RawMessage
+			if err := json.Unmarshal(payload, &list); err == nil {
+				var result []*SRACAssertionWithRaw
+				for _, item := range list {
+					assertion, digest, err := ParseSRACAssertion(item)
+					if err != nil {
+						return nil, err
+					}
+					result = append(result, &SRACAssertionWithRaw{
+						Assertion: assertion,
+						RawData:   item,
+						SHA256:    digest,
+						URI:       path,
+					})
+				}
+				return result, nil
+			}
+		}
+
 		var statement InTotoStatement
 		if err := json.Unmarshal(payload, &statement); err == nil && statement.Predicate != nil {
 			return parseSRACFromInTotoStatement(statement, payload, path)
@@ -263,18 +308,21 @@ func ParseSRACFile(path string) (*SRACAssertionWithRaw, error) {
 		if err != nil {
 			return nil, err
 		}
-		return &SRACAssertionWithRaw{
-			Assertion: assertion,
-			RawData:   payload,
-			SHA256:    digest,
-			URI:       path,
+		return []*SRACAssertionWithRaw{
+			{
+				Assertion: assertion,
+				RawData:   payload,
+				SHA256:    digest,
+				URI:       path,
+			},
 		}, nil
 	}
 
 	return nil, fmt.Errorf("file %s is not a recognized SRAC assertion or signed in-toto statement", path)
 }
 
-func parseSRACFromInTotoStatement(statement InTotoStatement, rawData []byte, path string) (*SRACAssertionWithRaw, error) {
+func parseSRACFromInTotoStatement(statement InTotoStatement, rawData []byte, path string) ([]*SRACAssertionWithRaw, error) {
+	var result []*SRACAssertionWithRaw
 	if attestationsRaw, ok := statement.Predicate["attestations"]; ok {
 		if attestationsList, ok := attestationsRaw.([]interface{}); ok {
 			for _, att := range attestationsList {
@@ -298,12 +346,15 @@ func parseSRACFromInTotoStatement(statement InTotoStatement, rawData []byte, pat
 				if err != nil {
 					return nil, err
 				}
-				return &SRACAssertionWithRaw{
+				result = append(result, &SRACAssertionWithRaw{
 					Assertion: assertion,
 					RawData:   marshaled,
 					SHA256:    digest,
 					URI:       path,
-				}, nil
+				})
+			}
+			if len(result) > 0 {
+				return result, nil
 			}
 		}
 	}
@@ -317,11 +368,13 @@ func parseSRACFromInTotoStatement(statement InTotoStatement, rawData []byte, pat
 	if err != nil {
 		return nil, err
 	}
-	return &SRACAssertionWithRaw{
-		Assertion: assertion,
-		RawData:   marshaled,
-		SHA256:    digest,
-		URI:       path,
+	return []*SRACAssertionWithRaw{
+		{
+			Assertion: assertion,
+			RawData:   marshaled,
+			SHA256:    digest,
+			URI:       path,
+		},
 	}, nil
 }
 

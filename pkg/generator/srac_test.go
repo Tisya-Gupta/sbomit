@@ -419,3 +419,87 @@ func TestGenerateWithSRACFileAndReport(t *testing.T) {
 		t.Errorf("expected output SBOM to contain SRAC sidecar reference")
 	}
 }
+
+func TestCorrelateSRACVersionWithVPrefix(t *testing.T) {
+	doc := createTestDocumentWithPackage("pkg:golang/example.com/brake@v1.0.0", "brake", "v1.0.0")
+
+	assertionJSON := []byte(validTestSRACAssertionJSON())
+	assertion, digest, err := attestation.ParseSRACAssertion(assertionJSON)
+	if err != nil {
+		t.Fatalf("parse assertion: %v", err)
+	}
+	assertion.Subject.PURL = "pkg:golang/example.com/brake@1.0.0"
+	assertion.Subject.Name = "brake"
+	assertion.Subject.Version = "1.0.0"
+
+	gen := New(nil)
+	assertions := []*attestation.SRACAssertionWithRaw{
+		{
+			Assertion: assertion,
+			RawData:   assertionJSON,
+			SHA256:    digest,
+			URI:       "test-v-prefix.json",
+		},
+	}
+
+	reports, summary, err := gen.CorrelateSRAC(doc, assertions, true)
+	if err != nil {
+		t.Fatalf("CorrelateSRAC failed: %v", err)
+	}
+	if summary.MatchedAssertions != 1 {
+		t.Errorf("expected 1 matched assertion, got %d", summary.MatchedAssertions)
+	}
+	if len(reports) != 1 || reports[0].MatchStatus != "matched" {
+		t.Errorf("expected matched report status, got %+v", reports)
+	}
+}
+
+func TestGenerateWithSRACFileArray(t *testing.T) {
+	tmpDir := t.TempDir()
+	sracFile := filepath.Join(tmpDir, "array.srac.json")
+
+	content := "[" + validTestSRACAssertionJSON() + "]"
+	if err := os.WriteFile(sracFile, []byte(content), 0600); err != nil {
+		t.Fatalf("write srac array: %v", err)
+	}
+
+	catalogFile := filepath.Join(tmpDir, "catalog.spdx.json")
+	catalogDoc := createTestDocumentWithPackage("pkg:generic/synthetic-brake-monitor@1.0.0", "synthetic-brake-monitor", "1.0.0")
+	if err := writer.New().WriteFileWithOptions(catalogDoc, catalogFile, &writer.Options{Format: formats.SPDX23JSON}); err != nil {
+		t.Fatalf("write catalog: %v", err)
+	}
+
+	reportFile := filepath.Join(tmpDir, "srac-report.json")
+	sbomOut := filepath.Join(tmpDir, "out.spdx.json")
+
+	gen := New(&Options{
+		DocumentName:    "test-srac-array-gen",
+		DocumentVersion: "1.0.0",
+		OutputFormat:    "spdx23",
+		OutputPath:      sbomOut,
+		CatalogFile:     catalogFile,
+		SRACFile:        sracFile,
+		SRACReport:      reportFile,
+		FailClosedSRAC:  true,
+	})
+
+	doc, err := gen.GenerateFromAttestations(nil)
+	if err != nil {
+		t.Fatalf("GenerateFromAttestations with array file failed: %v", err)
+	}
+	if doc == nil {
+		t.Fatalf("expected non-nil document")
+	}
+
+	reportData, err := os.ReadFile(reportFile)
+	if err != nil {
+		t.Fatalf("read report: %v", err)
+	}
+	var report attestation.SRACReport
+	if err := json.Unmarshal(reportData, &report); err != nil {
+		t.Fatalf("unmarshal report JSON: %v", err)
+	}
+	if report.MatchStatus != "matched" {
+		t.Errorf("expected report matchStatus 'matched', got %q", report.MatchStatus)
+	}
+}
